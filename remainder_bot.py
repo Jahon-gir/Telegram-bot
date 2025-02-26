@@ -1,58 +1,61 @@
-import time
-from datetime import datetime
-from telegram import Bot
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackContext
+import asyncio
 
-TOKEN = "7313362001:AAH4uqEnyJY3SozQSBde1kPWL05Nyt3kCK8"  # O'zingizning Telegram bot tok
+TOKEN = "7313362001:AAH4uqEnyJY3SozQSBde1kPWL05Nyt3kCK8"
 
-bot = Bot(token=TOKEN)
+# Esdaliklar ro‘yxati
+reminders = {}
 
-# Eslatmalar ro'yxati
-reminders = []
+async def start(update: Update, context: CallbackContext) -> None:
+    """Foydalanuvchiga bot haqida ma’lumot berish."""
+    await update.message.reply_text("Salom! Men eslatmalar botiman.\n"
+                                    "Menga /add buyruği bilan eslatma qo‘shing.\n"
+                                    "/list buyruği bilan eslatmalaringizni ko‘ring.")
 
-def set_reminder(update, context: CallbackContext):
-    """Foydalanuvchi eslatma qo'shishi uchun buyruq."""
+async def add_reminder(update: Update, context: CallbackContext) -> None:
+    """Yangi eslatma qo‘shish."""
+    chat_id = update.message.chat_id
+    if len(context.args) < 2:
+        await update.message.reply_text("To‘g‘ri format: /add <vaqt sekundlarda> <matn>")
+        return
+
     try:
-        text = " ".join(context.args)
-        if not text:
-            update.message.reply_text("❗ Iltimos, eslatma matnini yozing. Misol: /reminder 14:30 Kitob o'qish")
-            return
+        time = int(context.args[0])
+        text = " ".join(context.args[1:])
+    except ValueError:
+        await update.message.reply_text("Iltimos, vaqtni raqamda kiriting.")
+        return
 
-        time_part, message = text.split(" ", 1)
-        hour, minute = map(int, time_part.split(":"))
-        reminder_time = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if chat_id not in reminders:
+        reminders[chat_id] = []
 
-        reminders.append((reminder_time, message))
-        update.message.reply_text(f"✅ Eslatma qo'shildi: {message} ({time_part})")
+    reminders[chat_id].append((time, text))
+    await update.message.reply_text(f"Eslatma {time} sekunddan keyin yuboriladi: {text}")
 
-    except Exception as e:
-        update.message.reply_text("❌ Xatolik yuz berdi! Formati to'g'ri: /reminder 14:30 Kitob o'qish")
-        print(e)
+    await asyncio.sleep(time)
+    await context.bot.send_message(chat_id=chat_id, text=f"Eslatma: {text}")
 
-def check_reminders(context: CallbackContext):
-    """Har daqiqada eslatmalarni tekshirish."""
-    now = datetime.now().replace(second=0, microsecond=0)
-    for reminder in reminders[:]:
-        if reminder[0] == now:
-            context.bot.send_message(chat_id=context.job.context, text=f"⏰ Eslatma: {reminder[1]}")
-            reminders.remove(reminder)
+async def list_reminders(update: Update, context: CallbackContext) -> None:
+    """Foydalanuvchiga hozirgi eslatmalarni ko‘rsatish."""
+    chat_id = update.message.chat_id
+    if chat_id not in reminders or not reminders[chat_id]:
+        await update.message.reply_text("Sizda eslatmalar yo‘q.")
+        return
 
-def start(update, context):
-    """Botni ishga tushirish."""
-    update.message.reply_text("👋 Salom! Menga eslatma qo'shishingiz mumkin. Misol: /reminder 14:30 Mashq qilish")
+    reminder_text = "\n".join([f"{t} sek - {txt}" for t, txt in reminders[chat_id]])
+    await update.message.reply_text(f"Sizning eslatmalaringiz:\n{reminder_text}")
 
 def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    """Botni ishga tushirish."""
+    app = Application.builder().token(TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("reminder", set_reminder))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add_reminder))
+    app.add_handler(CommandHandler("list", list_reminders))
 
-    job_queue = updater.job_queue
-    job_queue.run_repeating(check_reminders, interval=60, first=0, context=update.message.chat_id)
-
-    updater.start_polling()
-    updater.idle()
+    print("Bot ishga tushdi...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
